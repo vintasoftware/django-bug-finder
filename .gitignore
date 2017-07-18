@@ -1,0 +1,86 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+/venv/
+/env/
+/build/
+/develop-eggs/
+/dist/
+/downloads/
+/eggs/
+/.eggs/
+/lib/
+/lib64/
+/parts/
+/sdist/
+/var/
+/.installed.cfg
+*.egg-info/
+*.egg
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+/htmlcov/
+/.tox/
+/.hypothesis/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+
+# Translations
+*.mo
+*.pot
+
+# Sphinx documentation
+/docs/_build/
+
+# PyBuilder
+/target/
+
+# OS Cruft
+*.DS_Store
+.DS_Store
+
+# Editor cruft
+ide/
+*.sublime-project
+*.sublime-workspace
+.idea
+.vscode
+
+# Sqlite db
+*.sqlite3
+
+# Dumps
+*.sql
+
+# Redis
+dump.rdb
+
+# Django output
+djangoserver.out
+
+# Env vars
+.env
+
+# Mypy
+.mypy_cache/
