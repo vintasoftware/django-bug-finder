@@ -40,7 +40,8 @@ QUERYSET_EXPRESSION_METHODS = {
 def build_fake_queryset_module(model_name, manager_name):
     return AstroidBuilder(MANAGER).string_build(textwrap.dedent('''
     import datetime
-    from django.db.models.query import *
+    from django.db.models.query import BaseIterable, RawQuerySet, QuerySet
+    from django.db.models import sql
 
     class QuerySetMethodsToManager:
         def iterator(self):
@@ -166,7 +167,6 @@ def build_fake_queryset_module(model_name, manager_name):
         @property
         def db(self):
             return self._db
-    queryset_manager_methods = QuerySetMethodsToManager()
 
     class FakeQuerySet(QuerySetMethodsToManager, QuerySet):
         def __init__(self, model=None, query=None, using=None, hints=None):
@@ -226,51 +226,55 @@ def build_fake_queryset_module(model_name, manager_name):
     '''.format(MODEL_NAME=model_name, MANAGER_NAME=manager_name)))
 
 
-def fix_django_manager_instance_methods(node, context=None):
-    model_cls = node.parent
-    manager_instance = next(node.value.infer())
+def transform_django_manager_instance_methods(node, context=None):
+    model_cls = node.scope()
+    try:
+        manager_cls = next(node.func.infer(context=context))
+        manager_instance = next(node.infer(context=context))
+    except InferenceError:
+        raise UseInferenceDefault()
 
-    _, [base_manager_cls] = MANAGER.ast_from_module_name(
-        'django.db.models.manager').lookup('BaseManager')
     fake_queryset_module = build_fake_queryset_module(
         model_name=model_cls.name,
-        manager_name=manager_instance.name)
+        manager_name=manager_cls.name)
     base_qs_cls = fake_queryset_module['QuerySetMethodsToManager']
 
     # fix scope for manager and model names
     fake_queryset_module.locals[model_cls.name] = [model_cls]
-    fake_queryset_module.locals[manager_instance._proxied.name] = [manager_instance._proxied]
+    fake_queryset_module.locals[manager_cls.name] = [manager_cls]
 
-    for base_cls in [base_manager_cls, base_qs_cls]:
-        for method in base_cls.methods():
-            manager_instance.locals[method.name] = [method]
+    # add missing quesyset methods to manager instance
+    for method in base_qs_cls.methods():
+        manager_instance.locals[method.name] = [method]
 
     return node
 
 
 def is_django_manager_in_model_class(node):
-    # is this of the form objects = Manager inside a class
-    if not isinstance(node.parent, ClassDef):
+    # is this of the form "objects = Manager" inside a class?
+    if not isinstance(node.parent, nodes.Assign):
         return False
-    if not isinstance(node.value, nodes.Call):
+    model_cls = node.scope()
+    if not isinstance(model_cls, nodes.ClassDef):
+        return False
+    # we'll not multiple assignment, probably no-one does this with managers
+    if len(node.parent.targets) > 1:
         return False
 
     try:
-        model_cls = next(node.parent.infer())
-        manager_cls = next(node.value.func.infer())
+        manager_cls = next(node.func.infer())
     except InferenceError:
         return False
     else:
         return (
-            isinstance(manager_cls, ClassDef) and
             model_cls.is_subtype_of('django.db.models.base.Model') and
             manager_cls.is_subtype_of('django.db.models.manager.Manager'))
 
 
 def add_transforms(manager):
     manager.register_transform(
-        nodes.Assign,
-        fix_django_manager_instance_methods,
+        nodes.Call,
+        transform_django_manager_instance_methods,
         is_django_manager_in_model_class)
 
 
