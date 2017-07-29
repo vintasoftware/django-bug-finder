@@ -217,7 +217,7 @@ def transform_django_manager_instance_methods(node, context=None):
     fake_queryset_module.locals[model_cls.name] = [model_cls]
     fake_queryset_module.locals[manager_cls.name] = [manager_cls]
 
-    # add missing quesyset methods to manager instance
+    # add missing queryset methods to manager instance
     for method in base_qs_cls.methods():
         manager_instance.locals[method.name] = [method]
 
