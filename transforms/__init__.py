@@ -8,47 +8,21 @@ from astroid.builder import AstroidBuilder
 import textwrap
 
 
-# Taken from: https://docs.djangoproject.com/en/1.11/ref/models/querysets/
-QUERYSET_EXPRESSION_METHODS = {
-    # Methods that return querysets
-    'filter',
-    'exclude',
-    'annotate',
-    'order_by',
-    'reverse',
-    'distinct',
-    'values',
-    'values_list',
-    'dates',
-    'datetimes',
-    'none',
-    'all',
-    'union',
-    'intersection',
-    'difference',
-    'select_related',
-    'prefetch_related',
-    'extra',
-    'defer',
-    'only',
-    'using',
-    'select_for_update',
-    'raw',
-}
-
-
-def build_fake_queryset_module(model_name, manager_name):
+def build_fake_queryset_module(model_name='Model', manager_name='Manager'):
     return AstroidBuilder(MANAGER).string_build(textwrap.dedent('''
     import datetime
-    from django.db.models.query import BaseIterable, RawQuerySet, QuerySet
+
+    from django.db.models.base import Model
     from django.db.models import sql
+    from django.db.models.manager import Manager
+    from django.db.models.query import BaseIterable, QuerySet as OriginalQuerySet, RawQuerySet
 
     class QuerySetMethodsToManager:
         def iterator(self):
             return iter(BaseIterable())
 
         def aggregate(self, *args, **kwargs):
-            return FakeQuerySet()
+            return QuerySet()
 
         def count(self):
             return 0
@@ -94,10 +68,10 @@ def build_fake_queryset_module(model_name, manager_name):
             return RawQuerySet()
 
         def values(self, *fields, **expressions):
-            return FakeQuerySet()
+            return QuerySet()
 
         def values_list(self, *fields, flat=False):
-            return FakeQuerySet()
+            return QuerySet()
 
         def dates(self, field_name, kind, order='ASC'):
             return [datetime.date()]
@@ -106,59 +80,59 @@ def build_fake_queryset_module(model_name, manager_name):
             return [datetime.datetime()]
 
         def none(self):
-            return FakeQuerySet()
+            return QuerySet()
 
         def all(self):
-            return FakeQuerySet()
+            return QuerySet()
 
         def filter(self, *args, **kwargs):
-            return FakeQuerySet()
+            return QuerySet()
 
         def exclude(self, *args, **kwargs):
-            return FakeQuerySet()
+            return QuerySet()
 
         def union(self, *other_qs, all=False):
-            return FakeQuerySet()
+            return QuerySet()
 
         def intersection(self, *other_qs):
-            return FakeQuerySet()
+            return QuerySet()
 
         def difference(self, *other_qs):
-            return FakeQuerySet()
+            return QuerySet()
 
         def select_for_update(self, nowait=False, skip_locked=False):
-            return FakeQuerySet()
+            return QuerySet()
 
         def select_related(self, *fields):
-            return FakeQuerySet()
+            return QuerySet()
 
         def prefetch_related(self, *lookups):
-            return FakeQuerySet()
+            return QuerySet()
 
         def annotate(self, *args, **kwargs):
-            return FakeQuerySet()
+            return QuerySet()
 
         def order_by(self, *field_names):
-            return FakeQuerySet()
+            return QuerySet()
 
         def distinct(self, *field_names):
-            return FakeQuerySet()
+            return QuerySet()
 
         def extra(self, select=None, where=None, params=None, tables=None,
                   order_by=None, select_params=None):
-            return FakeQuerySet()
+            return QuerySet()
 
         def reverse(self):
-            return FakeQuerySet()
+            return QuerySet()
 
         def defer(self, *fields):
-            return FakeQuerySet()
+            return QuerySet()
 
         def only(self, *fields):
-            return FakeQuerySet()
+            return QuerySet()
 
         def using(self, alias):
-            return FakeQuerySet()
+            return QuerySet()
 
         @property
         def ordered(self):
@@ -168,7 +142,7 @@ def build_fake_queryset_module(model_name, manager_name):
         def db(self):
             return self._db
 
-    class FakeQuerySet(QuerySetMethodsToManager, QuerySet):
+    class QuerySet(OriginalQuerySet, QuerySetMethodsToManager):
         def __init__(self, model=None, query=None, using=None, hints=None):
             self.model = {MODEL_NAME}
             self._db = using
@@ -184,7 +158,7 @@ def build_fake_queryset_module(model_name, manager_name):
             self._fields = None
 
         def __deepcopy__(self, memo):
-            return FakeQuerySet()
+            return QuerySet()
 
         def __getstate__(self):
             return self.__dict__.copy()
@@ -205,7 +179,7 @@ def build_fake_queryset_module(model_name, manager_name):
             return bool(self._result_cache)
 
         def __getitem__(self, k):
-            qs = FakeQuerySet()
+            qs = QuerySet()
             return list(qs)[0]
 
         def __and__(self, other):
@@ -257,7 +231,7 @@ def is_django_manager_in_model_class(node):
     model_cls = node.scope()
     if not isinstance(model_cls, nodes.ClassDef):
         return False
-    # we'll not multiple assignment, probably no-one does this with managers
+    # we'll not handle multiple assignment, probably no-one does this with managers
     if len(node.parent.targets) > 1:
         return False
 
@@ -276,6 +250,10 @@ def add_transforms(manager):
         nodes.Call,
         transform_django_manager_instance_methods,
         is_django_manager_in_model_class)
+    register_module_extender(
+        manager,
+        'django.db.models.query',
+        build_fake_queryset_module)
 
 
 add_transforms(MANAGER)

@@ -24,24 +24,13 @@ class QuerysetAttributionChecker(BaseChecker):
 
     def visit_expr(self, node):
         if isinstance(node.value, astroid.Call):
-            if isinstance(node.value.func, astroid.Attribute):
-                attr = node.value.func.attrname
-            elif isinstance(node.value.func, astroid.Name):
-                attr = node.value.func.name
-            else:
+            try:
+                for qs in node.value.infer():
+                    if qs.is_subtype_of('django.db.models.query.QuerySet'):
+                        self.add_message('queryset-expr-not-assigned', node=node)
+                        return
+            except astroid.InferenceError as e:
                 return
-
-            if attr in transforms.QUERYSET_EXPRESSION_METHODS:
-                try:
-                    method = next(node.value.func.infer())
-                except astroid.InferenceError:
-                    return
-
-                if (method.bound.is_subtype_of(
-                        'django.db.models.manager.Manager') or
-                    method.bound.is_subtype_of(
-                        'django.db.models.query.QuerySet')):
-                    self.add_message('queryset-expr-not-assigned', node=node)
 
 
 CELERY_TASK_CALL_FUNCTIONS = {  # TODO: improve this
