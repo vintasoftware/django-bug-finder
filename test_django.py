@@ -42,3 +42,7 @@ user = User.objects.get(email='a@b.com')
 user_qs = User.objects.filter(first_name='B')
 celery_task.delay(user)  # wrong
 celery_shared_task.si(user_qs=user_qs).delay()  # wrong
+celery_task.apply_async([user])  # wrong
+celery_task.apply_async([], {'user': user})  # wrong
+celery_task.apply_async(args=[user])  # wrong
+celery_task.apply_async(kwargs={'user': user})  # wrong

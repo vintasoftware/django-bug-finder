@@ -1,5 +1,5 @@
 import astroid
-from pylint.checkers import BaseChecker, utils
+from pylint.checkers import BaseChecker
 from pylint.interfaces import IAstroidChecker
 
 from django_bug_linter import transforms  # noqa: F401  # pylint: disable=unused-import
@@ -31,13 +31,6 @@ class QuerysetAttributionChecker(BaseChecker):
                 return
 
 
-CELERY_TASK_CALL_FUNCTIONS = {  # TODO: improve this
-    'delay',
-    'si',
-    's',
-}
-
-
 class CeleryCallWithModelsChecker(BaseChecker):
     __implements__ = IAstroidChecker
 
@@ -61,14 +54,30 @@ class CeleryCallWithModelsChecker(BaseChecker):
     }
     options = ()
 
+    CELERY_TASK_DECORATOR_NAMES = {
+        'task',
+        'shared_task',
+    }
+    # From: http://docs.celeryproject.org/en/latest/reference/celery.app.task.html
+    CELERY_TASK_DIRECT_CALLS = {
+        'delay',
+        'si',
+        's',
+        'signature',
+    }
+    CELERY_TASK_ARGS_CALLS = {
+        'apply',
+        'apply_async',
+        'retry',
+    }
+
     def __init__(self, linter=None):
         super().__init__(linter)
-        self._found_celery_task_nodes = set()
+        self._task_function_def_nodes = set()
 
     def visit_functiondef(self, node):
-        # Find Celery tasks
+        # Find Celery tasks and store them on self._task_function_def_nodes
         if node.decorators:
-            names = {'task', 'shared_task'}
             for decorator in node.decorators.nodes:
                 if isinstance(decorator, astroid.Attribute):
                     attr = decorator.attrname
@@ -77,16 +86,65 @@ class CeleryCallWithModelsChecker(BaseChecker):
                 else:
                     continue
 
-                if attr in names:
-                    inferred = utils.safe_infer(decorator)
-                    if inferred.is_bound() and \
-                            inferred.bound.is_subtype_of('celery.app.base.Celery'):
-                        self._found_celery_task_nodes.add(node)
+                if attr in self.CELERY_TASK_DECORATOR_NAMES:
+                    try:
+                        for inferred in decorator.infer():
+                            if inferred.is_bound() and \
+                                    inferred.bound.is_subtype_of('celery.app.base.Celery'):
+                                self._task_function_def_nodes.add(node)
+                                return
+                            elif not inferred.is_bound() and \
+                                    inferred.qname() == 'celery.app.shared_task':
+                                self._task_function_def_nodes.add(node)
+                                return
+                    except astroid.InferenceError:
                         return
-                    elif not inferred.is_bound() and \
-                            inferred.qname() == 'celery.app.shared_task':
-                        self._found_celery_task_nodes.add(node)
+
+    def _add_message_if_model_arg(self, node, args, kwargs):
+        for arg in (args + kwargs):
+            try:
+                for obj in arg.infer():
+                    if obj.is_subtype_of('django.db.models.query.QuerySet'):
+                        self.add_message('celery-call-with-queryset', node=node)
                         return
+                    elif obj.is_subtype_of('django.db.models.base.Model'):
+                        self.add_message('celery-call-with-model-instance', node=node)
+                        return
+            except astroid.InferenceError:
+                return
+
+    def _visit_celery_task_direct_call(self, node):
+        args = node.args
+        kwargs = [key.value for key in (node.keywords or [])]
+
+        for arg in (args + kwargs):
+            self._add_message_if_model_arg(node, args, kwargs)
+
+    def _visit_celery_task_args_call(self, node):
+        # node.args[0] and node.args[1] are task args and kwargs respectively
+        args = []
+        kwargs = []
+        if len(node.args) >= 1:
+            # Only try to infer if it's a list
+            if node.args[0].pytype() == 'builtins.list':
+                args = node.args[0].itered()
+        if len(node.args) >= 2:
+            # Only try to infer if it's a dict
+            if node.args[1].pytype() == 'builtins.dict':
+                kwargs = [v for __, v in node.args[1].itered()]
+        if not args:
+            for key in (node.keywords or []):
+                if key.arg == 'args':
+                    args = key.value.itered()
+                    break
+        if not kwargs:
+            for key in (node.keywords or []):
+                if key.arg == 'kwargs':
+                    kwargs = [v for __, v in key.value.itered()]
+                    break
+
+        for arg in (args + kwargs):
+            self._add_message_if_model_arg(node, args, kwargs)
 
     def visit_call(self, node):
         if isinstance(node.func, astroid.Attribute):
@@ -96,14 +154,13 @@ class CeleryCallWithModelsChecker(BaseChecker):
         else:
             return
 
-        if attr in CELERY_TASK_CALL_FUNCTIONS:
-            function_def = utils.safe_infer(node.func.expr)
-            if function_def in self._found_celery_task_nodes:
-                args = node.args + [k.value for k in (node.keywords or [])]
-                for arg in args:
-                    obj = utils.safe_infer(arg)
-                    if obj:
-                        if obj.is_subtype_of('django.db.models.query.QuerySet'):
-                            self.add_message('celery-call-with-queryset', node=node)
-                        elif obj.is_subtype_of('django.db.models.base.Model'):
-                            self.add_message('celery-call-with-model-instance', node=node)
+        if attr in self.CELERY_TASK_DIRECT_CALLS or attr in self.CELERY_TASK_ARGS_CALLS:
+            try:
+                for function_def in node.func.expr.infer():
+                    if function_def in self._task_function_def_nodes:
+                        if attr in self.CELERY_TASK_DIRECT_CALLS:
+                            self._visit_celery_task_direct_call(node)
+                        elif attr in self.CELERY_TASK_ARGS_CALLS:
+                            self._visit_celery_task_args_call(node)
+            except astroid.InferenceError:
+                return
