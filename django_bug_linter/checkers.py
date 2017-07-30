@@ -1,10 +1,8 @@
 import astroid
-
 from pylint.checkers import BaseChecker, utils
 from pylint.interfaces import IAstroidChecker
 
-import pylint_django.transforms
-import transforms
+from django_bug_linter import transforms  # noqa: F401  # pylint: disable=unused-import
 
 
 class QuerysetAttributionChecker(BaseChecker):
@@ -13,12 +11,12 @@ class QuerysetAttributionChecker(BaseChecker):
     name = 'queryset-expr'
     priority = -1
     msgs = {
-      'E9001': (
-          'Queryset expression is not assigned.',
-          'queryset-expr-not-assigned',
-          'Operations over a queryset should be '
-          'assigned to something or returned.'
-      ),
+        'E9001': (
+            'Queryset expression is not assigned.',
+            'queryset-expr-not-assigned',
+            'Operations over a queryset should be '
+            'assigned to something or returned.'
+        ),
     }
     options = ()
 
@@ -46,20 +44,20 @@ class CeleryCallWithModelsChecker(BaseChecker):
     name = 'celery-call-with-models'
     priority = -1
     msgs = {
-      'E9002': (
-          'Celery task call with model instance as argument.',
-          'celery-call-with-model-instance',
-          'Celery tasks shouldn\'t be called with model instances '
-          'as arguments. Pass the PK instead and fetch the instance '
-          'inside the task to avoid race conditions.'
-      ),
-      'E9003': (
-          'Celery task call with queryset as argument.',
-          'celery-call-with-queryset',
-          'Celery tasks shouldn\'t be called with queryset instances '
-          'as arguments. Pass the necessary values to make the query '
-          'inside the task to avoid race conditions.'
-      ),
+        'E9002': (
+            'Celery task call with model instance as argument.',
+            'celery-call-with-model-instance',
+            'Celery tasks shouldn\'t be called with model instances '
+            'as arguments. Pass the PK instead and fetch the instance '
+            'inside the task to avoid race conditions.'
+        ),
+        'E9003': (
+            'Celery task call with queryset as argument.',
+            'celery-call-with-queryset',
+            'Celery tasks shouldn\'t be called with queryset instances '
+            'as arguments. Pass the necessary values to make the query '
+            'inside the task to avoid race conditions.'
+        ),
     }
     options = ()
 
@@ -109,8 +107,3 @@ class CeleryCallWithModelsChecker(BaseChecker):
                             self.add_message('celery-call-with-queryset', node=node)
                         elif obj.is_subtype_of('django.db.models.base.Model'):
                             self.add_message('celery-call-with-model-instance', node=node)
-
-
-def register(linter):
-    linter.register_checker(QuerysetAttributionChecker(linter))
-    linter.register_checker(CeleryCallWithModelsChecker(linter))

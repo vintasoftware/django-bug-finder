@@ -1,15 +1,11 @@
-import astroid
-from astroid import MANAGER, nodes, InferenceError, inference_tip, UseInferenceDefault
-from pylint_django.compat import ClassDef, instantiate_class, Attribute
-from pylint_django.transforms import foreignkey, fields
-from pylint_django import utils
-from astroid import MANAGER, register_module_extender
-from astroid.builder import AstroidBuilder
 import textwrap
+
+import astroid
+from astroid.builder import AstroidBuilder
 
 
 def build_fake_queryset_module(model_name='Model', manager_name='Manager'):
-    return AstroidBuilder(MANAGER).string_build(textwrap.dedent('''
+    return AstroidBuilder(astroid.MANAGER).string_build(textwrap.dedent('''
     import datetime
 
     from django.db.models.base import Model
@@ -17,7 +13,7 @@ def build_fake_queryset_module(model_name='Model', manager_name='Manager'):
     from django.db.models.manager import Manager
     from django.db.models.query import BaseIterable, QuerySet as OriginalQuerySet, RawQuerySet
 
-    class QuerySetMethodsToManager:
+    class _QuerySetMethodsToManager:
         def iterator(self):
             return iter(BaseIterable())
 
@@ -142,7 +138,7 @@ def build_fake_queryset_module(model_name='Model', manager_name='Manager'):
         def db(self):
             return self._db
 
-    class QuerySet(OriginalQuerySet, QuerySetMethodsToManager):
+    class QuerySet(OriginalQuerySet, _QuerySetMethodsToManager):
         def __init__(self, model=None, query=None, using=None, hints=None):
             self.model = {MODEL_NAME}
             self._db = using
@@ -205,20 +201,20 @@ def transform_django_manager_instance_methods(node, context=None):
     try:
         manager_cls = next(node.func.infer(context=context))
         manager_instance = next(node.infer(context=context))
-    except InferenceError:
-        raise UseInferenceDefault()
+    except astroid.InferenceError:
+        raise astroid.UseInferenceDefault()
 
     fake_queryset_module = build_fake_queryset_module(
         model_name=model_cls.name,
         manager_name=manager_cls.name)
-    base_qs_cls = fake_queryset_module['QuerySetMethodsToManager']
+    qs_methods_cls = fake_queryset_module['_QuerySetMethodsToManager']
 
     # fix scope for manager and model names
     fake_queryset_module.locals[model_cls.name] = [model_cls]
     fake_queryset_module.locals[manager_cls.name] = [manager_cls]
 
     # add missing queryset methods to manager instance
-    for method in base_qs_cls.methods():
+    for method in qs_methods_cls.methods():
         manager_instance.locals[method.name] = [method]
 
     return node
@@ -226,10 +222,10 @@ def transform_django_manager_instance_methods(node, context=None):
 
 def is_django_manager_in_model_class(node):
     # is this of the form "objects = Manager" inside a class?
-    if not isinstance(node.parent, nodes.Assign):
+    if not isinstance(node.parent, astroid.Assign):
         return False
     model_cls = node.scope()
-    if not isinstance(model_cls, nodes.ClassDef):
+    if not isinstance(model_cls, astroid.ClassDef):
         return False
     # we'll not handle multiple assignment, probably no-one does this with managers
     if len(node.parent.targets) > 1:
@@ -237,7 +233,7 @@ def is_django_manager_in_model_class(node):
 
     try:
         manager_cls = next(node.func.infer())
-    except InferenceError:
+    except astroid.InferenceError:
         return False
     else:
         return (
@@ -247,13 +243,13 @@ def is_django_manager_in_model_class(node):
 
 def add_transforms(manager):
     manager.register_transform(
-        nodes.Call,
+        astroid.Call,
         transform_django_manager_instance_methods,
         is_django_manager_in_model_class)
-    register_module_extender(
+    astroid.register_module_extender(
         manager,
         'django.db.models.query',
         build_fake_queryset_module)
 
 
-add_transforms(MANAGER)
+add_transforms(astroid.MANAGER)
