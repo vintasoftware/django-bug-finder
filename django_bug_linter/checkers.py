@@ -125,21 +125,23 @@ class CeleryCallWithModelsChecker(BaseChecker):
         args = []
         kwargs = []
         if len(node.args) >= 1:
-            # Only try to infer if it's a list
-            if node.args[0].pytype() == 'builtins.list':
+            # Only try to infer if it's a list or a tuple, because that's what Celery expects
+            if node.args[0].pytype() in {'builtins.list', 'builtins.tuple'}:
                 args = node.args[0].itered()
         if len(node.args) >= 2:
-            # Only try to infer if it's a dict
+            # Only try to infer if it's a dict, because that's what Celery expects
             if node.args[1].pytype() == 'builtins.dict':
                 kwargs = [v for __, v in node.args[1].itered()]
         if not args:
             for key in (node.keywords or []):
-                if key.arg == 'args':
+                if key.arg == 'args' and \
+                        key.value.pytype() in {'builtins.list', 'builtins.tuple'}:
                     args = key.value.itered()
                     break
         if not kwargs:
             for key in (node.keywords or []):
-                if key.arg == 'kwargs':
+                if key.arg == 'kwargs' and \
+                        key.value.pytype() == 'builtins.dict':
                     kwargs = [v for __, v in key.value.itered()]
                     break
 
