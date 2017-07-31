@@ -4,13 +4,13 @@ import astroid
 from astroid.builder import AstroidBuilder
 
 
-def build_fake_queryset_module(model_name='Model', manager_name='Manager'):
+def build_fake_queryset_module(model_name='Model', manager_name='BaseManager'):
     return AstroidBuilder(astroid.MANAGER).string_build(textwrap.dedent('''
     import datetime
 
     from django.db.models.base import Model
     from django.db.models import sql
-    from django.db.models.manager import Manager
+    from django.db.models.manager import BaseManager
     from django.db.models.query import BaseIterable, QuerySet as OriginalQuerySet, RawQuerySet
 
     class _QuerySetMethodsToManager:
@@ -241,11 +241,44 @@ def is_django_manager_in_model_class(node):
             manager_cls.is_subtype_of('django.db.models.manager.Manager'))
 
 
+def transform_django_class_adding_default_manager(model_cls, context=None):
+    fake_queryset_module = build_fake_queryset_module(
+        model_name=model_cls.name,
+        manager_name='BaseManager')
+    manager_cls = astroid.MANAGER.ast_from_module_name('django.db.models.manager')['BaseManager']
+    manager_instance = manager_cls.instantiate_class()
+    qs_methods_cls = fake_queryset_module['_QuerySetMethodsToManager']
+
+    # fix scope for model name
+    fake_queryset_module.locals[model_cls.name] = [model_cls]
+
+    # add missing queryset methods to manager instance
+    for method in qs_methods_cls.methods():
+        manager_instance.locals[method.name] = [method]
+
+    # add default manager to class
+    model_cls.locals['objects'] = [manager_instance]
+
+    return model_cls
+
+
+def is_model_class_without_manager(model_cls):
+    if not isinstance(model_cls, astroid.ClassDef):
+        return False
+    return (
+        model_cls.is_subtype_of('django.db.models.base.Model') and
+        'objects' not in model_cls.locals)
+
+
 def add_transforms(manager):
     manager.register_transform(
         astroid.Call,
         transform_django_manager_instance_methods,
         is_django_manager_in_model_class)
+    manager.register_transform(
+        astroid.ClassDef,
+        transform_django_class_adding_default_manager,
+        is_model_class_without_manager)
     astroid.register_module_extender(
         manager,
         'django.db.models.query',

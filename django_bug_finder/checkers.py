@@ -2,7 +2,7 @@ import astroid
 from pylint.checkers import BaseChecker
 from pylint.interfaces import IAstroidChecker
 
-from django_bug_linter import transforms  # noqa: F401  # pylint: disable=unused-import
+from django_bug_finder import transforms  # noqa: F401  # pylint: disable=unused-import
 
 
 class QuerysetAttributionChecker(BaseChecker):
@@ -74,21 +74,28 @@ class CeleryCallWithModelsChecker(BaseChecker):
     def __init__(self, linter=None):
         super().__init__(linter)
         self._task_function_def_nodes = set()
+        self._call_checks_fns = []
 
     def visit_functiondef(self, node):
         # Find Celery tasks and store them on self._task_function_def_nodes
         if node.decorators:
             for decorator in node.decorators.nodes:
-                if isinstance(decorator, astroid.Attribute):
+                if isinstance(decorator, astroid.Attribute):  # e.g.: @celery_app.task
                     attr = decorator.attrname
-                elif isinstance(decorator, astroid.Name):
+                elif isinstance(decorator, astroid.Name):  # e.g.: @shared_task
                     attr = decorator.name
+                elif isinstance(decorator, astroid.Call):  # e.g.: @celery_app.task(acks_late=True)
+                    attr = decorator.func.attrname
                 else:
-                    continue
+                    continue  # unkown decorator type, ignore
 
                 if attr in self.CELERY_TASK_DECORATOR_NAMES:
+                    if isinstance(decorator, astroid.Call):
+                        inference_generator = decorator.func.infer()
+                    else:
+                        inference_generator = decorator.infer()
                     try:
-                        for inferred in decorator.infer():
+                        for inferred in inference_generator:
                             if inferred.is_bound() and \
                                     inferred.bound.is_subtype_of('celery.app.base.Celery'):
                                 self._task_function_def_nodes.add(node)
@@ -149,20 +156,29 @@ class CeleryCallWithModelsChecker(BaseChecker):
             self._add_message_if_model_arg(node, args, kwargs)
 
     def visit_call(self, node):
-        if isinstance(node.func, astroid.Attribute):
-            attr = node.func.attrname
-        elif isinstance(node.func, astroid.Name):
-            attr = node.func.name
-        else:
-            return
-
-        if attr in self.CELERY_TASK_DIRECT_CALLS or attr in self.CELERY_TASK_ARGS_CALLS:
-            try:
-                for function_def in node.func.expr.infer():
-                    if function_def in self._task_function_def_nodes:
-                        if attr in self.CELERY_TASK_DIRECT_CALLS:
-                            self._visit_celery_task_direct_call(node)
-                        elif attr in self.CELERY_TASK_ARGS_CALLS:
-                            self._visit_celery_task_args_call(node)
-            except astroid.InferenceError:
+        def _check():
+            if isinstance(node.func, astroid.Attribute):
+                attr = node.func.attrname
+            elif isinstance(node.func, astroid.Name):
+                attr = node.func.name
+            else:
                 return
+
+            if attr in self.CELERY_TASK_DIRECT_CALLS or attr in self.CELERY_TASK_ARGS_CALLS:
+                try:
+                    for function_def in node.func.expr.infer():
+                        if function_def in self._task_function_def_nodes:
+                            if attr in self.CELERY_TASK_DIRECT_CALLS:
+                                self._visit_celery_task_direct_call(node)
+                            elif attr in self.CELERY_TASK_ARGS_CALLS:
+                                self._visit_celery_task_args_call(node)
+                except astroid.InferenceError:
+                    return
+
+        self._call_checks_fns.append(_check)
+
+    def leave_module(self, node):
+        # check the calls only after all nodes have been visited,
+        # to avoid visiting calls before visiting function defs
+        for _check in self._call_checks_fns:
+            _check()

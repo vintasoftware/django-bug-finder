@@ -1,4 +1,4 @@
-from django_bug_linter.checkers import CeleryCallWithModelsChecker, QuerysetAttributionChecker
+from django_bug_finder.checkers import CeleryCallWithModelsChecker, QuerysetAttributionChecker
 
 
 def register(linter):
