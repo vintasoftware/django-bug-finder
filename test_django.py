@@ -22,10 +22,13 @@ def test():
 class PersonQuerySet(models.QuerySet):
 
     def authors(self):
-        self.filter(role='A')  # wrong
+        return self.filter(role='A')
+
+    def admin_authors(self):
+        self.filter(is_admin=True).authors()  # wrong
 
     def editors(self):
-        return self.filter(role='E')
+        self.filter(role='E')  # wrong
 
 
 @app.task
